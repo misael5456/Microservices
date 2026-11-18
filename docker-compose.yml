@@ -1,0 +1,49 @@
+services:
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on: [upload, download, list, delete]
+
+  metadata:
+    build: ./metadata-service
+    volumes:
+      - meta-data:/data 
+
+  upload:
+    build: ./upload-service
+    environment:
+      METADATA_URL: http://metadata:5000
+      MAX_SIZE_MB: 20
+    volumes:
+      - files:/storage
+    depends_on: [metadata]
+
+  download:
+    build: ./download-service
+    environment:
+      METADATA_URL: http://metadata:5000
+    volumes:
+      - files:/storage:ro  
+    depends_on: [metadata]
+
+  list:
+    build: ./list-service
+    environment:
+      METADATA_URL: http://metadata:5000
+    depends_on: [metadata]
+
+  delete:
+    build: ./delete-service
+    environment:
+      METADATA_URL: http://metadata:5000
+    volumes:
+      - files:/storage
+    depends_on: [metadata]
+
+volumes:
+  files:
+  meta-data:

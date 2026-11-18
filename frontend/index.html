@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini-servidor de archivos</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #6b7385;
+    --border: #e1e4ea;
+    --accent: #2f6fed;
+    --accent-soft: #e8effd;
+    --ok: #1f9d55;
+    --bad: #d64545;
+    --radius: 10px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  header {
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.2rem; margin: 0; }
+  header h1 span { color: var(--muted); font-weight: 400; font-size: .9rem; margin-left: 6px; }
+  main { max-width: 1000px; margin: 24px auto; padding: 0 16px; display: grid; gap: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card h2 { font-size: 1rem; margin: 0 0 14px; }
+
+  /* Estado de servicios */
+  .services { display: flex; gap: 8px; flex-wrap: wrap; }
+  .svc {
+    display: flex; align-items: center; gap: 6px; font-size: .8rem;
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #b8bec9; }
+  .svc.up .dot { background: var(--ok); }
+  .svc.down { border-color: #f1c4c4; background: #fdf0f0; }
+  .svc.down .dot { background: var(--bad); }
+
+  /* Zona de subida */
+  .drop {
+    display: block; line-height: 1.6;
+    border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px;
+    text-align: center; color: var(--muted); cursor: pointer; transition: .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .drop strong { color: var(--text); }
+  .uploads { margin-top: 12px; display: grid; gap: 8px; }
+  .up-item { font-size: .85rem; }
+  .up-item .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .1s; }
+  .up-item.done .bar > div { background: var(--ok); }
+  .up-item.error .bar > div { background: var(--bad); width: 100%; }
+
+  /* Filtros y tabla */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  input[type=text] {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: .9rem;
+  }
+  #search { flex: 1; min-width: 180px; }
+  #ext { width: 140px; }
+  button {
+    font: inherit; font-size: .85rem; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  }
+  button:hover { background: var(--bg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.danger { color: var(--bad); }
+  button.danger:hover { background: #fdf0f0; border-color: #f1c4c4; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: .8rem; padding: 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .name { display: flex; align-items: center; gap: 10px; word-break: break-all; }
+  .badge {
+    flex-shrink: 0; font-size: .65rem; font-weight: 600; text-transform: uppercase;
+    background: var(--accent-soft); color: var(--accent); border-radius: 5px; padding: 3px 6px; min-width: 38px; text-align: center;
+  }
+  .actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .muted { color: var(--muted); }
+  .empty { text-align: center; padding: 30px; color: var(--muted); }
+  .summary { font-size: .8rem; color: var(--muted); margin-top: 10px; }
+
+  /* Diálogo de confirmación */
+  dialog { border: none; border-radius: var(--radius); padding: 24px; max-width: 380px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+  dialog::backdrop { background: rgba(20,25,35,.4); }
+  dialog p { margin: 0 0 20px; }
+  dialog .actions { justify-content: flex-end; }
+
+  /* Notificaciones */
+  #toasts { position: fixed; bottom: 20px; right: 20px; display: grid; gap: 8px; z-index: 10; }
+  .toast {
+    background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: .88rem;
+    box-shadow: 0 4px 16px rgba(0,0,0,.15); animation: in .2s ease-out; max-width: 340px;
+  }
+  .toast.error { background: var(--bad); }
+  .toast.ok { background: var(--ok); }
+  @keyframes in { from { opacity: 0; transform: translateY(8px); } }
+
+  @media (max-width: 640px) {
+    .hide-sm { display: none; }
+    .actions { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📁 Mini-servidor de archivos <span>cliente web</span></h1>
+  <div class="services" id="services" title="Estado de cada microservicio (se actualiza cada 5 s)"></div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Subir archivos</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="fileInput" multiple hidden>
+      <strong>Arrastra archivos aquí</strong> o haz clic para seleccionarlos<br>
+      <small>Máximo 20 MB por archivo</small>
+    </label>
+    <div class="uploads" id="uploads"></div>
+  </section>
+
+  <section class="card">
+    <h2>Archivos</h2>
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="Buscar por nombre…">
+      <input type="text" id="ext" placeholder="Extensión (pdf)">
+      <button id="refresh">Actualizar</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th class="hide-sm">Tamaño</th>
+          <th class="hide-sm">Fecha</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="list"></tbody>
+    </table>
+    <div class="summary" id="summary"></div>
+  </section>
+</main>
+
+<dialog id="confirm">
+  <p id="confirmText"></p>
+  <div class="actions">
+    <button value="cancel" id="cancelBtn">Cancelar</button>
+    <button class="primary" style="background:var(--bad);border-color:var(--bad)" id="okBtn">Eliminar</button>
+  </div>
+</dialog>
+
+<div id="toasts"></div>
+
+<script>
+const API = '';
+const SERVICES = ['upload', 'download', 'list', 'delete', 'metadata'];
+const MAX_MB = 20;
+
+const $ = (sel) => document.querySelector(sel);
+
+// ---------- Utilidades ----------
+function formatSize(bytes) {
+  if (bytes == null) return '—';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (bytes >= 1024 && i < u.length - 1) { bytes /= 1024; i++; }
+  return `${bytes.toFixed(i ? 1 : 0)} ${u[i]}`;
+}
+function formatDate(iso) {
+  return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+}
+function extOf(name) {
+  const i = name.lastIndexOf('.');
+  return i > 0 ? name.slice(i + 1).slice(0, 4) : '—';
+}
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  $('#toasts').append(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+function el(tag, props = {}, ...children) {
+  const e = document.createElement(tag);
+  Object.assign(e, props);
+  e.append(...children);
+  return e;
+}
+async function errorMessage(resp) {
+  try { return (await resp.json()).error || `Error ${resp.status}`; }
+  catch { return `Error ${resp.status}`; }
+}
+
+// ---------- Estado de los microservicios ----------
+async function checkServices() {
+  const box = $('#services');
+  const results = await Promise.all(SERVICES.map(async (s) => {
+    try {
+      const r = await fetch(`${API}/health/${s}`, { cache: 'no-store' });
+      return [s, r.ok];
+    } catch { return [s, false]; }
+  }));
+  box.replaceChildren(...results.map(([s, up]) =>
+    el('span', { className: `svc ${up ? 'up' : 'down'}`, title: up ? 'Disponible' : 'No disponible' },
+      el('span', { className: 'dot' }), s)));
+}
+
+// ---------- Listar (list-service) ----------
+async function loadFiles() {
+  const params = new URLSearchParams();
+  const name = $('#search').value.trim();
+  const ext = $('#ext').value.trim().replace(/^\./, '');
+  if (name) params.set('name', name);
+  if (ext) params.set('ext', ext);
+
+  const tbody = $('#list');
+  try {
+    const r = await fetch(`${API}/files?${params}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    const { total, files } = await r.json();
+
+    if (!files.length) {
+      tbody.replaceChildren(el('tr', {}, el('td', { colSpan: 4, className: 'empty',
+        textContent: name || ext ? 'Ningún archivo coincide con el filtro.' : 'Aún no hay archivos. ¡Sube el primero!' })));
+    } else {
+      tbody.replaceChildren(...files.map(renderRow));
+    }
+    const totalSize = files.reduce((a, f) => a + (f.size || 0), 0);
+    $('#summary').textContent = `${total} archivo(s) · ${formatSize(totalSize)}`;
+  } catch (err) {
+    tbody.replaceChildren(el('tr', {}, el('td', { colSpan: 4, className: 'empty',
+      textContent: `No se pudo obtener la lista: ${err.message}` })));
+    $('#summary').textContent = '';
+  }
+}
+
+function renderRow(f) {
+  const download = el('button', { textContent: 'Descargar', onclick: () => downloadFile(f) });
+  const del = el('button', { className: 'danger', textContent: 'Eliminar', onclick: () => deleteFile(f) });
+  return el('tr', {},
+    el('td', {}, el('div', { className: 'name' },
+      el('span', { className: 'badge', textContent: extOf(f.name) }), f.name)),
+    el('td', { className: 'hide-sm muted', textContent: formatSize(f.size) }),
+    el('td', { className: 'hide-sm muted', textContent: formatDate(f.createdAt) }),
+    el('td', {}, el('div', { className: 'actions' }, download, del)));
+}
+
+// ---------- Descargar (download-service) ----------
+async function downloadFile(f) {
+  try {
+    const r = await fetch(`${API}/files/${encodeURIComponent(f.id)}`);
+    if (!r.ok) throw new Error(await errorMessage(r));
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: f.name });
+    document.body.append(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    toast(`No se pudo descargar: ${err.message}`, 'error');
+  }
+}
+
+// ---------- Eliminar (delete-service) ----------
+function confirmDialog(text) {
+  return new Promise((resolve) => {
+    const d = $('#confirm');
+    $('#confirmText').textContent = text;
+    $('#okBtn').onclick = () => { d.close(); resolve(true); };
+    $('#cancelBtn').onclick = () => { d.close(); resolve(false); };
+    d.oncancel = () => resolve(false);
+    d.showModal();
+  });
+}
+async function deleteFile(f) {
+  if (!await confirmDialog(`¿Eliminar "${f.name}"? Esta acción no se puede deshacer.`)) return;
+  try {
+    const r = await fetch(`${API}/files/${encodeURIComponent(f.id)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    toast(`"${f.name}" eliminado`, 'ok');
+    loadFiles();
+  } catch (err) {
+    toast(`No se pudo eliminar: ${err.message}`, 'error');
+  }
+}
+
+// ---------- Subir (upload-service) ----------
+function uploadFile(file) {
+  const item = el('div', { className: 'up-item' });
+  const status = el('span', { className: 'muted', textContent: '0%' });
+  const fill = el('div');
+  item.append(el('div', { className: 'row' }, el('span', { textContent: file.name }), status),
+              el('div', { className: 'bar' }, fill));
+  $('#uploads').prepend(item);
+  const finish = (ok, msg) => {
+    item.classList.add(ok ? 'done' : 'error');
+    status.textContent = msg;
+    setTimeout(() => item.remove(), ok ? 2500 : 6000);
+  };
+
+  if (file.size > MAX_MB * 1024 * 1024) {
+    finish(false, `Supera ${MAX_MB} MB`);
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API}/files`);
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      const p = Math.round((e.loaded / e.total) * 100);
+      fill.style.width = p + '%';
+      status.textContent = p + '%';
+    };
+    xhr.onload = () => {
+      if (xhr.status === 201) { finish(true, 'Listo ✓'); resolve(true); return; }
+      let msg = `Error ${xhr.status}`;
+      try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
+      finish(false, msg); resolve(false);
+    };
+    xhr.onerror = () => { finish(false, 'Error de red'); resolve(false); };
+    const form = new FormData();
+    form.append('file', file);
+    xhr.send(form);
+  });
+}
+async function uploadAll(files) {
+  if (!files.length) return;
+  const results = [];
+  for (const f of files) results.push(await uploadFile(f));
+  const ok = results.filter(Boolean).length;
+  if (ok) toast(`${ok} de ${files.length} archivo(s) subido(s)`, ok === files.length ? 'ok' : '');
+  loadFiles();
+}
+
+// ---------- Eventos ----------
+const drop = $('#drop');
+$('#fileInput').addEventListener('change', (e) => { uploadAll([...e.target.files]); e.target.value = ''; });
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => uploadAll([...e.dataTransfer.files]));
+
+let debounce;
+['#search', '#ext'].forEach(s => $(s).addEventListener('input', () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(loadFiles, 300);
+}));
+$('#refresh').addEventListener('click', () => { loadFiles(); checkServices(); });
+
+// ---------- Inicio ----------
+loadFiles();
+checkServices();
+setInterval(checkServices, 5000);
+</script>
+</body>
+</html>
